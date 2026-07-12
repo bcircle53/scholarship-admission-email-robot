@@ -1,20 +1,19 @@
 name: Scholarship Robot Unsubscribe Monitor
 
 on:
-  workflow_dispatch:        # manual trigger available at any time
-  # IMPORTANT (playbook §3.5 / Phase 6): schedule intentionally left commented out.
-  # This niche's pipeline is still in Phase 3/pre-launch testing — enable the 6 cron
-  # lines below only after the Phase 5 manual test (workflow_dispatch runs, STOP/NEUTRAL
-  # classification tests) all pass.
-  # schedule:
-  #   # 6 runs/day — 15 min after sender (:30) to avoid git conflicts
-  #   # Times in UTC; WAT = UTC+1
-  #   - cron: "45 1 * * *"   # 02:45 WAT
-  #   - cron: "45 5 * * *"   # 06:45 WAT
-  #   - cron: "45 9 * * *"   # 10:45 WAT
-  #   - cron: "45 13 * * *"  # 14:45 WAT
-  #   - cron: "45 17 * * *"  # 18:45 WAT
-  #   - cron: "45 21 * * *"  # 22:45 WAT
+  workflow_dispatch:        # manual trigger still available at any time
+  # Phase 6 enabled 2026-07-12: Phase 5 manual tests passed (STOP/NEUTRAL classification
+  # verified, is_automated() own-domain + subject-pattern gap fixed and re-verified against
+  # the 3 real senders that slipped through the first live run).
+  schedule:
+    # 6 runs/day — 15 min after sender (:30) to avoid git conflicts
+    # Times in UTC; WAT = UTC+1
+    - cron: "45 1 * * *"   # 02:45 WAT
+    - cron: "45 5 * * *"   # 06:45 WAT
+    - cron: "45 9 * * *"   # 10:45 WAT
+    - cron: "45 13 * * *"  # 14:45 WAT
+    - cron: "45 17 * * *"  # 18:45 WAT
+    - cron: "45 21 * * *"  # 22:45 WAT
 
 concurrency:
   group: scholarship-unsub-pipeline
