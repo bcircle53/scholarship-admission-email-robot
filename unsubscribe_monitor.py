@@ -68,17 +68,40 @@ AUTOMATED_ADDRESS_PATTERNS = re.compile(
     r"mailer-daemon|postmaster|bounce|bounces|"
     r"notification|notifications|alert|alerts|"
     r"support@.*brevo|account-alerts|t\.brevo\.com|"
-    r"mailjet\.com|sendinblue\.com)",
+    r"mailjet\.com|sendinblue\.com|"
+    r"^cpanel@|^webmaster@|^root@|^admin@)",
     re.IGNORECASE,
 )
 
-def is_automated(msg, sender_email: str) -> bool:
+# Subject-line patterns that indicate an automated ticketing/confirmation system —
+# catches auto-responders that don't set a proper Auto-Submitted header (many don't,
+# despite RFC 3834). Found via a live run: support@unischolarz.com ("Thank You for
+# Reaching Out to Us!") and help@doctutorials.com ("[##46626##] Your ticket has been
+# created") both slipped past the header check and got a real auto-reply sent to them.
+AUTOMATED_SUBJECT_PATTERNS = re.compile(
+    r"(\[#{1,2}\d+#{1,2}\]|ticket (has been|#|created|received)|"
+    r"case\s*#|thank you for (reaching out|contacting|your (email|message|inquiry))|"
+    r"we('ve| have) received your|your (inquiry|request) has been received)",
+    re.IGNORECASE,
+)
+
+def is_automated(msg, sender_email: str, subject: str = "") -> bool:
     """
     Return True if the message appears to be from an automated system.
-    Checks sender address patterns AND standard email headers.
+    Checks sender address patterns, our own sending domain, standard email
+    headers, and (as a fallback for systems that don't set proper headers)
+    subject-line patterns typical of ticketing/confirmation auto-responders.
     """
     # Pattern match on the sender address itself
     if AUTOMATED_ADDRESS_PATTERNS.search(sender_email):
+        return True
+
+    # Never reply to anything sent from our own sending domain — that's always
+    # a hosting-system notification (cPanel, mail server alerts, etc.), never a
+    # real prospective student. Caught live: cpanel@admission.lulllitcloud.com
+    # got a full marketing auto-reply before this check existed.
+    own_domain = FROM_EMAIL.split("@", 1)[1].lower()
+    if sender_email.endswith("@" + own_domain):
         return True
 
     # Standard headers that automated mailers set
@@ -91,6 +114,10 @@ def is_automated(msg, sender_email: str) -> bool:
         return True
 
     if msg.get("X-Auto-Response-Suppress"):
+        return True
+
+    # Fallback: subject-line heuristics for auto-responders with no proper headers
+    if subject and AUTOMATED_SUBJECT_PATTERNS.search(subject):
         return True
 
     return False
@@ -226,7 +253,7 @@ def strip_quoted_text(body: str) -> str:
 def classify(body: str) -> str:
     """
     Returns: "stop", "positive", or "neutral".
-    Uses word-boundary regex to avoid false matches (e.g. "stopping" ≠ "stop").
+    Uses word-boundary regex to avoid false matches (e.g. "stopping" != "stop").
     STOP is checked first — takes priority over positive.
     Only classifies the fresh reply text — quoted original emails are stripped first.
     """
@@ -373,7 +400,7 @@ def send_reply(to_email: str, subject: str, body: str, dry_run: bool = False) ->
     Never touches bounced_emails.txt — reply failures are transient.
     """
     if dry_run:
-        log.info(f"[DRY-RUN] Would send '{subject}' → {to_email}")
+        log.info(f"[DRY-RUN] Would send '{subject}' -> {to_email}")
         return True
 
     msg            = MIMEMultipart("alternative")
@@ -388,7 +415,7 @@ def send_reply(to_email: str, subject: str, body: str, dry_run: bool = False) ->
             server.starttls()
             server.login(BREVO["user"], BREVO["pass"])
             server.sendmail(FROM_EMAIL, [to_email], msg.as_string())
-        log.info(f"REPLIED → {to_email} | {subject}")
+        log.info(f"REPLIED -> {to_email} | {subject}")
         return True
 
     except smtplib.SMTPAuthenticationError as e:
@@ -396,7 +423,7 @@ def send_reply(to_email: str, subject: str, body: str, dry_run: bool = False) ->
         return False
 
     except Exception as e:
-        log.error(f"Reply send failed → {to_email}: {e}")
+        log.error(f"Reply send failed -> {to_email}: {e}")
         return False
 
 # ============================================
@@ -410,7 +437,7 @@ def run(dry_run: bool = False):
         log.error("ROMANCE_EMAIL_PASS not set — exiting.")
         return
 
-    # ── Connect to IMAP ──────────────────────────────────────────────────
+    # -- Connect to IMAP --------------------------------------------------
     try:
         mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
         log.info(f"Attempting IMAP login as: {IMAP_USER}")
@@ -481,7 +508,7 @@ def run(dry_run: bool = False):
                 continue
 
             # Skip automated / transactional senders (Brevo alerts, mailer-daemons, etc.)
-            if is_automated(msg, sender_email):
+            if is_automated(msg, sender_email, subject):
                 log.info(f"Skipping — automated sender: {sender_email}")
                 if message_id and not dry_run:
                     save_processed_id(message_id)
@@ -489,9 +516,9 @@ def run(dry_run: bool = False):
 
             # Classify the reply
             label = classify(body)
-            log.info(f"→ Classified: {label.upper()}")
+            log.info(f"-> Classified: {label.upper()}")
 
-            # ── Act on classification ─────────────────────────────────────
+            # -- Act on classification ------------------------------------
             if label == "stop":
                 if not dry_run:
                     append_unsub(sender_email)
@@ -517,7 +544,7 @@ def run(dry_run: bool = False):
 
             processed += 1
 
-        # ── Batch save tracking once at end (only if changed) ────────────
+        # -- Batch save tracking once at end (only if changed) ------------
         if tracking_dirty:
             save_tracking(tracking)
             log.info("email_tracking.csv saved.")

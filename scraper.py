@@ -1666,7 +1666,7 @@ def analyze_emails(email_list):
         print("\n" + "=" * 60)
         print("EMAIL QUALITY REPORT:")
         print("  Total emails    : " + str(total))
-        print("  Reader emails   : " + str(reader_count) + " (" + str(pct) + "%)")
+        print("  Scholarship-relevant emails : " + str(reader_count) + " (" + str(pct) + "%)")
         rating = "Excellent!" if pct > 70 else ("Good - improving" if pct > 50 else "Needs better keywords")
         print("  Rating          : " + rating)
         print("=" * 60)
