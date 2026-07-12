@@ -2,7 +2,7 @@
   "date": "2026-07-12",
   "start_date": "2026-07-12",
   "relays": {
-    "Brevo": 0,
+    "Brevo": 50,
     "Mailjet": 0
   }
 }
