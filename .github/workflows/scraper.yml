@@ -1,0 +1,95 @@
+name: Scholarship Robot - Daily Email Scraper
+
+on:
+  schedule:
+    - cron: '0 1 * * *'    # 2 AM WAT  - Batch 1
+    - cron: '0 5 * * *'    # 6 AM WAT  - Batch 2
+    - cron: '0 9 * * *'    # 10 AM WAT - Batch 3
+    - cron: '0 13 * * *'   # 2 PM WAT  - Batch 4
+    - cron: '0 17 * * *'   # 6 PM WAT  - Batch 5
+    - cron: '0 21 * * *'   # 10 PM WAT - Batch 6
+  workflow_dispatch:
+    inputs:
+      batch:
+        description: 'Keyword batch to run (1-6)'
+        required: false
+        default: '1'
+
+concurrency:
+  group: scholarship-robot-pipeline
+  cancel-in-progress: false  # Queue runs, never cancel — each batch must complete
+
+permissions:
+  contents: write  # Required for auto-commit step
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}  # Needed for push in auto-commit
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Determine batch number
+        id: batch
+        run: |
+          HOUR=$(date -u +%H)
+          if [ "${{ github.event.inputs.batch }}" != "" ]; then
+            echo "batch=${{ github.event.inputs.batch }}" >> $GITHUB_OUTPUT
+          elif [ "$HOUR" -ge "1" ] && [ "$HOUR" -lt "5" ]; then
+            echo "batch=1" >> $GITHUB_OUTPUT
+          elif [ "$HOUR" -ge "5" ] && [ "$HOUR" -lt "9" ]; then
+            echo "batch=2" >> $GITHUB_OUTPUT
+          elif [ "$HOUR" -ge "9" ] && [ "$HOUR" -lt "13" ]; then
+            echo "batch=3" >> $GITHUB_OUTPUT
+          elif [ "$HOUR" -ge "13" ] && [ "$HOUR" -lt "17" ]; then
+            echo "batch=4" >> $GITHUB_OUTPUT
+          elif [ "$HOUR" -ge "17" ] && [ "$HOUR" -lt "21" ]; then
+            echo "batch=5" >> $GITHUB_OUTPUT
+          else
+            echo "batch=6" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run scraper
+        env:
+          BATCH: ${{ steps.batch.outputs.batch }}
+          GITHUB_ACTIONS: true
+          PROXY_LIST: ${{ secrets.PROXY_LIST }}
+          GITHUB_TOKENS: ${{ secrets.GITHUB_TOKENS }}
+        run: python scraper.py
+
+      - name: Auto-commit results to repo
+        run: |
+          git config user.name "scholarship-robot[bot]"
+          git config user.email "scholarship-robot@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git add master_emails.txt visited_urls.json yield_tracker.json emails_log.txt 2>/dev/null || true
+          git diff --cached --quiet && echo "Nothing new to commit" || git commit -m "bot: batch ${{ steps.batch.outputs.batch }} results [skip ci]"
+          git push origin main 2>/dev/null || echo "Push skipped - no changes or conflict"
+
+      - name: Upload today's results
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: scholarship-leads-batch${{ steps.batch.outputs.batch }}-${{ github.run_id }}
+          path: master_emails.txt
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload master email list
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: master-emails-latest
+          path: master_emails.txt
+          retention-days: 90
+          overwrite: true
