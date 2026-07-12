@@ -606,7 +606,26 @@ def find_emails(text):
     return emails
 
 def clean_emails(email_list):
+    """
+    Hardened 2026-07-12: a manual audit of a live scrape found 23/110 emails
+    with an EXACT blocked local-part (info@, contact@, help@, hello@, press@,
+    sales@) still surviving into master_emails.txt, plus a majority of the
+    remainder being university faculty, government/embassy contacts, and
+    competitor scholarship-platform addresses rather than individual students.
+    This version adds: a substring pass (catches concatenation artifacts like
+    "19E-Mailinfo@..." where scraped snippet text glued onto the role word),
+    an explicit domain blocklist for confirmed non-student organizations, a
+    known-TLD whitelist + institutional-label check for non-personal-provider
+    domains (personal providers like gmail/yahoo/hotmail/outlook are exempted
+    from domain scrutiny — only role-word checks apply to them, since that's
+    where real students actually are), and a single-character-local-part block.
+    """
     email_list = list(set(email_list))
+
+    personal_providers = {
+        'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'live.com',
+        'icloud.com', 'protonmail.com', 'aol.com', 'yandex.com', 'gmx.com',
+    }
 
     blocked_local_exact = {
         'admin', 'webmaster', 'noreply', 'no-reply', 'donotreply',
@@ -615,10 +634,72 @@ def clean_emails(email_list):
         'cto', 'founder', 'hello', 'team', 'staff', 'office'
     }
 
+    # Longer, low-collision-risk words safe to match as a substring anywhere
+    # in the local-part (catches concatenation artifacts the exact-match
+    # check above misses, e.g. "DSFinfo@..." or "Inquiriesawards@...").
+    blocked_local_substr = [
+        'info', 'contact', 'inquir', 'support', 'hello', 'webmaster',
+        'noreply', 'donotreply', 'marketing', 'corporatesite',
+        'registrator', 'webcomm', 'connect', 'partnership', 'institute',
+        'application', 'president', 'official',
+    ]
+
     blocked_domains_exact = {
         'example.com', 'test.com', 'sentry.io', 'amazonaws.com',
-        'cloudflare.com', 'noreply.github.com', 'users.noreply.github.com'
+        'cloudflare.com', 'noreply.github.com', 'users.noreply.github.com',
+        # Competitor / adjacent scholarship & study-abroad businesses
+        'buddy4study.com', 'scholarshipowl.com', 'scholarshipsads.com',
+        'unischolars.com', 'englishan.com', 'wemakescholars.com',
+        'doctutorials.com', 'reachivy.com', 'studiesabroad.com',
+        'meetuniversity.com', 'bold.org', 'ciee.org', 'iie.org',
+        'central-scholarship.org', 'denverscholarship.org',
+        'globalacademia.com', 'globalacademia.com.tr', 'asiaexchange.org',
+        'snycosmos.com', 'studypedia.com', 'vvcd.org', 'meridean.org',
+        # Unrelated businesses / news / VC picked up as scraping noise
+        'newsexpressngr.com', 'frontpageafricaonline.com',
+        'blakeyshaulage.co.uk', 'ccdsuperstores.com', 'ceacapa.com',
+        'davisnm.org', 'isep.org', 'sarahsalotti.co.uk', 'northcoast.vc',
+        # Chinese Q&A platform — irrelevant to this niche
+        'zhihu.com',
+        # University domains without an .edu/.ac label (faculty found in audit)
+        'wur.nl', 'uu.nl', 'tue.nl', 'slu.se', 'hku.hk',
+        'uantwerpen.be', 'umcg.nl', 'locean-ipsl.upmc.fr',
+        # Placeholder / documentation-example domain
+        'your-company.com',
     }
+
+    known_tlds = {
+        'com', 'org', 'net', 'edu', 'gov', 'io', 'co', 'info', 'biz', 'me',
+        'ng', 'gh', 'ke', 'za', 'rw', 'tz', 'ug', 'zm', 'zw', 'ci', 'sn', 'cm', 'et',
+        'uk', 'ie', 'de', 'fr', 'nl', 'be', 'se', 'no', 'fi', 'dk', 'es', 'it',
+        'pl', 'tr', 'ch', 'at', 'us', 'ca', 'au', 'nz', 'cn', 'jp', 'kr', 'in', 'hk', 'vi', 'vc',
+    }
+    known_tld_combos = {
+        'co.uk', 'co.za', 'co.ke', 'co.nz', 'co.jp', 'com.ng', 'com.gh',
+        'com.au', 'com.tr', 'ac.uk', 'ac.za', 'ac.rw', 'ac.ke', 'edu.ph',
+        'edu.rw', 'edu.in', 'gov.uk', 'gov.tr', 'gov.ng', 'org.ng', 'net.ng',
+    }
+
+    def domain_has_institutional_label(domain):
+        labels = domain.split('.')
+        return any(l in ('gov', 'edu', 'ac') for l in labels)
+
+    def tld_is_known(domain):
+        labels = domain.split('.')
+        if len(labels) < 2:
+            return False
+        return labels[-1] in known_tlds or '.'.join(labels[-2:]) in known_tld_combos
+
+    def domain_label_suspicious(domain):
+        labels = domain.split('.')
+        if len(labels) < 2:
+            return True
+        sld = labels[-2]
+        if len(sld) <= 1:
+            return True
+        if len(sld) == 2 and not any(v in sld for v in 'aeiou'):
+            return True
+        return False
 
     clean_list = []
     for email in email_list:
@@ -628,10 +709,24 @@ def clean_emails(email_list):
         if len(parts) != 2:
             continue
         local, domain = parts[0], parts[1]
+
         if local in blocked_local_exact:
+            continue
+        if any(word in local for word in blocked_local_substr):
+            continue
+        if len(local) <= 1:
             continue
         if domain in blocked_domains_exact:
             continue
+
+        if domain not in personal_providers:
+            if domain_has_institutional_label(domain):
+                continue
+            if not tld_is_known(domain):
+                continue
+            if domain_label_suspicious(domain):
+                continue
+
         clean_list.append(email)
 
     return clean_list
