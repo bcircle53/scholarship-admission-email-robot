@@ -2,10 +2,11 @@
   "daily_yields": [
     338,
     396,
-    567
+    567,
+    471
   ],
   "baseline": 433.6666666666667,
   "expansion_level": 0,
-  "today_date": "2026-07-15",
-  "today_total": 471
+  "today_date": "2026-07-16",
+  "today_total": 277
 }
