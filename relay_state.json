@@ -1,8 +1,8 @@
 {
-  "date": "2026-07-18",
+  "date": "2026-07-19",
   "start_date": "2026-07-12",
   "relays": {
-    "Brevo": 50,
+    "Brevo": 100,
     "Mailjet": 0
   }
 }
